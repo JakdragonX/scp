@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Foundation Internal Review Terminal</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    /* Amber phosphor palette — P3 phosphor, ca. 1970s */
+    --bg:       #0a0800;
+    --dim:      #3a2e00;
+    --muted:    #6b5200;
+    --body:     #c8960a;
+    --bright:   #f0b90a;
+    --head-bg:  #c8960a;
+    --head-fg:  #0a0800;
+    --warn:     #c8960a;
+    --err:      #8a3a00;
+    --err-b:    #ff6a00;
+
+    --font:      'Courier New', Courier, monospace;
+    --font-size: 13px;
+    --line:      1.55;
+  }
+
+  html, body {
+    background: var(--bg);
+    color: var(--body);
+    font-family: var(--font);
+    font-size: var(--font-size);
+    line-height: var(--line);
+    height: 100%;
+    /* Subtle phosphor glow on text */
+    text-shadow: 0 0 6px rgba(200, 150, 10, 0.25);
+  }
+
+  #terminal {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    width: 100%;
+  }
+
+  /* ── Header bar — reversed video, TUI style ── */
+  #titlebar {
+    background: var(--head-bg);
+    color: var(--head-fg);
+    padding: 2px 8px;
+    font-size: var(--font-size);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    flex-shrink: 0;
+    user-select: none;
+    text-shadow: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  #titlebar-label { font-weight: normal; }
+  #titlebar-right  { font-size: 11px; opacity: 0.7; }
+
+  /* ── Divider lines — box-drawing ── */
+  .tui-rule {
+    color: var(--muted);
+    flex-shrink: 0;
+    padding: 0 0;
+    overflow: hidden;
+    white-space: nowrap;
+    letter-spacing: 0;
+    line-height: 1;
+    font-size: var(--font-size);
+    text-shadow: none;
+  }
+
+  /* ── Output ── */
+  #output {
+    flex: 1;
+    overflow-y: scroll;
+    padding: 6px 8px 4px;
+  }
+  /* Hide scrollbar — TUI doesn't show one */
+  #output::-webkit-scrollbar { width: 0; }
+
+  .out-line {
+    display: block;
+    white-space: pre-wrap;
+    word-break: break-word;
+    min-height: 1.55em;
+  }
+
+  /* color classes — all amber-family, differentiated by brightness */
+  .c-green  { color: var(--bright); }        /* repurposed: bright amber = "success" */
+  .c-amber  { color: var(--bright); }        /* warnings, headings */
+  .c-red    { color: var(--err-b);
+              text-shadow: 0 0 6px rgba(255,106,0,0.4); } /* errors */
+  .c-blue   { color: var(--body); }          /* structural labels */
+  .c-muted  { color: var(--muted); }         /* timestamps, machine noise */
+  .c-bright { color: var(--bright); }        /* personal voice, spoken text */
+  .c-body   { color: var(--body); }          /* general content */
+
+  /* ── Hint chips — bracket style, no radius ── */
+  #hints {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    padding: 3px 8px;
+    flex-shrink: 0;
+    border-top: 1px solid var(--muted);
+    row-gap: 3px;
+  }
+  .chip {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-family: var(--font);
+    font-size: var(--font-size);
+    padding: 0 6px 0 0;
+    cursor: pointer;
+    user-select: none;
+    text-shadow: none;
+    border-radius: 0;
+    outline: none;
+    transition: color 0.08s;
+  }
+  .chip::before { content: '['; }
+  .chip::after  { content: ']'; }
+  .chip:hover   { color: var(--bright); }
+  .chip:focus   { color: var(--bright); }
+  .chip.permanent { color: var(--dim); }
+  .chip.permanent:hover { color: var(--muted); }
+
+  /* ── Input row ── */
+  #input-row {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 2px 8px 6px;
+    flex-shrink: 0;
+  }
+  #prompt-label {
+    color: var(--body);
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-right: 4px;
+  }
+  #cmd-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--bright);
+    font-family: var(--font);
+    font-size: var(--font-size);
+    caret-color: var(--bright);
+    text-shadow: 0 0 6px rgba(200,150,10,0.4);
+  }
+  #cmd-input::placeholder { color: var(--muted); opacity: 0.6; }
+</style>
+</head>
+<body>
+
+<div id="terminal">
+  <div id="titlebar">
+    <span id="titlebar-label"> FOUNDATION INTERNAL REVIEW TERMINAL </span>
+    <span id="titlebar-right">CASE 0001-ALPHA</span>
+  </div>
+  <div id="output"></div>
+  <div id="hints"></div>
+  <div id="input-row">
+    <span id="prompt-label">guest@fnd:~$</span>
+    <input id="cmd-input" type="text" autocomplete="off" spellcheck="false" placeholder="type a command…" />
+  </div>
+</div>
+
+<script>
+// ============================================================
+//  FILESYSTEM DEFINITION
+//  Edit this section to build your story.
+//
+//  HOW TO ADD A FILE:
+//
+//  '/path/to/filename': {
+//    type: 'file',
+//    lines: [
+//      { c: 'color-class', t: 'text content' },
+//      { c: 'color-class', t: 'text content' },
+//    ],
+//    requires: ['path/to/prereq1', '/path/to/prereq2'],  // optional gate
+//  },
+//
+//  HOW TO ADD A DIRECTORY:
+//
+//  '/path/to/dirname/': {
+//    type: 'dir',
+//    children: ['filename', 'subdir/'],
+//  },
+//
+//  COLOR CLASSES:
+//    'c-green'   prompt green   — system confirmations, headings
+//    'c-amber'   amber          — warnings, notices, dates
+//    'c-red'     red            — errors, access denied, critical
+//    'c-blue'    blue           — file labels, structural info
+//    'c-muted'   muted gray     — timestamps, machine output labels
+//    'c-bright'  bright white   — spoken dialogue, personal voice
+//    'c-body'    default gray   — general content
+//    ''          (empty string) — blank line (use t: '' as well)
+//
+//  BLANK LINES:
+//    { c: '', t: '' }
+//    These preserve intentional spacing inside a file.
+//
+//  GATING (requires):
+//    List the full paths of files that must be read before this
+//    file unlocks. Use the exact path key as written below.
+//    Example: requires: ['/evidence/incident_report', '/evidence/sys_log_a']
+//
+//  PARTIAL TIMESTAMPS / ARTIFACTS:
+//    Just use { c: 'c-muted', t: '-- 196' } etc.
+//    Any string content is valid.
+//
+// ============================================================
+
+const FS = {
+
+  // ── ROOT ─────────────────────────────────────────────────
+  '/': {
+    type: 'dir',
+    children: ['README'],
+    // Add more root-level entries here as you write them.
+    // Example: children: ['README', 'dev01/', 'evidence/'],
+  },
+
+  '/README': {
+    type: 'file',
+    lines: [
+      { c: 'c-amber',  t: 'FOUNDATION ARCHIVE TRANSFER NOTICE' },
+      { c: 'c-muted',  t: 'Transfer completed: [REDACTED]' },
+      { c: 'c-muted',  t: 'Transferred by:    [contact archivist for identification]' },
+      { c: '',         t: '' },
+      { c: 'c-body',   t: '-- PLACEHOLDER: Write your README content here. --' },
+      { c: 'c-body',   t: '-- This file should establish the archival framing.  --' },
+      { c: 'c-body',   t: '-- Clinical. Terse. No editorializing.               --' },
+      { c: '',         t: '' },
+      { c: 'c-muted',  t: 'For identification of personnel referenced herein,' },
+      { c: 'c-muted',  t: 'contact the transferring archivist directly.' },
+    ],
+  },
+
+  // ── EXAMPLE: HOW TO ADD DIRECTORIES AND FILES ────────────
+  //
+  // Uncomment and edit the blocks below as you write each section.
+  // Add the directory name to its parent's children array first.
+  //
+  // '/dev01/': {
+  //   type: 'dir',
+  //   children: ['logs/'],
+  // },
+  //
+  // '/dev01/logs/': {
+  //   type: 'dir',
+  //   children: ['entry_001'],
+  // },
+  //
+  // '/dev01/logs/entry_001': {
+  //   type: 'file',
+  //   lines: [
+  //     { c: 'c-muted',  t: '-- 196' },
+  //     { c: '',         t: '' },
+  //     { c: 'c-bright', t: 'In an effort to appease my sanity, I have created this.' },
+  //     { c: 'c-bright', t: 'What to call it? A text interface? An editor?_' },
+  //     { c: 'c-bright', t: 'Oh, thhe stream is still broken. And I can\'t go back.' },
+  //     { c: 'c-bright', t: 'Will fix this later. Couldn\'t find my notebook.' },
+  //     { c: '',         t: '' },
+  //     { c: 'c-muted',  t: '-- 196' },
+  //     { c: '',         t: '' },
+  //     { c: 'c-bright', t: 'Working on further improvements. There\'s still an issue with initialization.<cr>' },
+  //     { c: 'c-bright', t: 'Not sure what permanent storage looks like yet. This might get overwrit<cr>' },
+  //     { c: 'c-bright', t: 'ten. And I need to figure out how to close without reloading tmpfs.' },
+  //     { c: '',         t: '' },
+  //     { c: 'c-bright', t: 'At least this is faster than punchcards, i think.' },
+  //   ],
+  // },
+  //
+  // '/evidence/': {
+  //   type: 'dir',
+  //   children: ['sys_log_a', 'sys_log_b', 'incident_report', 'review/'],
+  // },
+  //
+  // '/evidence/review/': {
+  //   type: 'dir',
+  //   children: ['transcript', 'findings'],
+  // },
+  //
+  // '/evidence/transcript': {
+  //   type: 'file',
+  //   requires: ['/evidence/incident_report', '/evidence/sys_log_a', '/evidence/sys_log_b'],
+  //   lines: [
+  //     { c: 'c-amber',  t: 'AUDIO TRANSCRIPT — Interview with [INITIALS REDACTED]' },
+  //     { c: 'c-muted',  t: 'Reviewing Officer: [REDACTED]' },
+  //     { c: '',         t: '' },
+  //     { c: 'c-body',   t: '-- PLACEHOLDER --' },
+  //   ],
+  // },
+
+};
+
+// ============================================================
+//  TERMINAL ENGINE — no editing needed below this line
+// ============================================================
+
+const outputEl   = document.getElementById('output');
+const hintsEl    = document.getElementById('hints');
+const inputEl    = document.getElementById('cmd-input');
+const promptEl   = document.getElementById('prompt-label');
+const titleLabel = document.getElementById('titlebar-label');
+
+let cwd     = '/';
+let history = [];
+let histIdx = -1;
+const read  = new Set();
+
+// ── Rendering ──────────────────────────────────────────────
+
+function print(lines) {
+  lines.forEach(({ c, t }) => {
+    const el = document.createElement('span');
+    el.className = 'out-line' + (c ? ' ' + c : '');
+    el.textContent = t;
+    outputEl.appendChild(el);
+  });
+  scrollBottom();
+}
+
+function printLine(cls, text) {
+  print([{ c: cls, t: text }]);
+}
+
+function blank() {
+  print([{ c: '', t: '' }]);
+}
+
+function echoCmd(cmd) {
+  printLine('c-green', promptString() + ' ' + cmd);
+}
+
+function scrollBottom() {
+  outputEl.scrollTop = outputEl.scrollHeight;
+}
+
+// ── Path helpers ───────────────────────────────────────────
+
+function promptString() {
+  const display = cwd === '/' ? '~' : '~' + cwd.replace(/\/$/, '');
+  return 'guest@fnd:' + display + '$';
+}
+
+function updatePrompt() {
+  promptEl.textContent = promptString();
+}
+
+function resolvePath(target) {
+  if (target.startsWith('/')) return target;
+  const base = cwd === '/' ? '/' : cwd;
+  return (base + target).replace('//', '/');
+}
+
+function nodeName(path) {
+  return path.replace(/\/$/, '').split('/').pop() || '/';
+}
+
+// ── Directory listing ──────────────────────────────────────
+
+function lsDir(path) {
+  const key = path.endsWith('/') ? path : path + '/';
+  const node = FS[key] || FS[path];
+  if (!node || node.type !== 'dir') {
+    printLine('c-red', 'ls: cannot access \'' + path + '\': not a directory');
+    return;
+  }
+  node.children.forEach(name => {
+    const isDir     = name.endsWith('/');
+    const fullPath  = (path === '/' ? '/' : path) + name;
+    const fileNode  = FS[fullPath];
+    const locked    = fileNode && fileNode.requires && !prereqsMet(fileNode.requires);
+    printLine(locked ? 'c-red' : isDir ? 'c-blue' : 'c-body', '  ' + name);
+  });
+  updateHints(node.children, path);
+}
+
+// ── Hints ──────────────────────────────────────────────────
+
+function updateHints(children, basePath) {
+  // clear contextual chips (keep permanents)
+  const perms = hintsEl.querySelectorAll('.permanent');
+  hintsEl.innerHTML = '';
+  perms.forEach(p => hintsEl.appendChild(p));
+
+  children.slice(0, 6).forEach(name => {
+    const isDir    = name.endsWith('/');
+    const fullPath = (basePath === '/' ? '/' : basePath) + name;
+    const fileNode = FS[fullPath];
+    const locked   = fileNode && fileNode.requires && !prereqsMet(fileNode.requires);
+    if (locked) return;
+    const verb = isDir ? 'cd ' : 'cat ';
+    addChip(verb + name, () => runCmd(verb + name));
+  });
+
+  if (cwd !== '/') {
+    addChip('cd ..', () => runCmd('cd ..'));
+  }
+}
+
+function addChip(label, fn, permanent) {
+  const chip = document.createElement('button');
+  chip.className = 'chip' + (permanent ? ' permanent' : '');
+  chip.textContent = label;
+  chip.addEventListener('click', fn);
+  hintsEl.appendChild(chip);
+}
+
+function buildPermanentChips() {
+  addChip('clear', () => runCmd('clear'), true);
+  addChip('pwd',   () => runCmd('pwd'),   true);
+}
+
+// ── Gate check ────────────────────────────────────────────
+
+function prereqsMet(requires) {
+  if (!requires || requires.length === 0) return true;
+  return requires.every(p => read.has(p));
+}
+
+// ── Commands ───────────────────────────────────────────────
+
+const COMMANDS = {
+
+  help() {
+    print([
+      { c: 'c-body',   t: 'COMMANDS:' },
+      { c: 'c-body',   t: '  ls              list directory contents' },
+      { c: 'c-body',   t: '  cd [dir]        change directory' },
+      { c: 'c-body',   t: '  cd ..           go up one level' },
+      { c: 'c-body',   t: '  cat [file]      read a file' },
+      { c: 'c-body',   t: '  pwd             print working directory' },
+      { c: 'c-body',   t: '  clear           clear screen' },
+      { c: 'c-body',   t: '  help            this message' },
+      { c: '',         t: '' },
+      { c: 'c-muted',  t: '  TAB             autocomplete' },
+      { c: 'c-muted',  t: '  UP / DOWN       command history' },
+    ]);
+  },
+
+  clear() {
+    outputEl.innerHTML = '';
+  },
+
+  pwd() {
+    printLine('c-body', cwd);
+  },
+
+  ls(args) {
+    lsDir(cwd);
+  },
+
+  cd(args) {
+    const target = args[0];
+
+    if (!target || target === '~') {
+      cwd = '/';
+      updatePrompt();
+      printLine('c-muted', '~');
+      lsDir('/');
+      return;
+    }
+
+    if (target === '..') {
+      if (cwd === '/') { printLine('c-muted', 'Already at root.'); return; }
+      const parts = cwd.replace(/\/$/, '').split('/').filter(Boolean);
+      parts.pop();
+      cwd = parts.length === 0 ? '/' : '/' + parts.join('/') + '/';
+      updatePrompt();
+      lsDir(cwd);
+      return;
+    }
+
+    const rawTarget = target.endsWith('/') ? target : target + '/';
+    const full      = resolvePath(rawTarget);
+    const node      = FS[full];
+
+    if (!node || node.type !== 'dir') {
+      printLine('c-red', 'cd: ' + target + ': no such directory');
+      return;
+    }
+
+    cwd = full;
+    updatePrompt();
+    lsDir(cwd);
+  },
+
+  cat(args) {
+    const name = args[0];
+    if (!name) { printLine('c-red', 'cat: missing filename'); return; }
+
+    const full = resolvePath(name);
+    const node = FS[full];
+
+    if (!node) {
+      printLine('c-red', 'cat: ' + name + ': no such file');
+      return;
+    }
+
+    if (node.type === 'dir') {
+      printLine('c-red', 'cat: ' + name + ': is a directory');
+      return;
+    }
+
+    // Gate check
+    if (node.requires && !prereqsMet(node.requires)) {
+      print([
+        { c: 'c-red',   t: 'PERMISSION DENIED.' },
+        { c: 'c-muted', t: 'Additional materials must be reviewed before access is granted.' },
+        { c: 'c-muted', t: 'Review available files in this directory first.' },
+      ]);
+      return;
+    }
+
+    // Render file
+    blank();
+    print(node.lines.map(l => ({ c: l.c, t: l.t })));
+    blank();
+
+    read.add(full);
+  },
+
+};
+
+// ── Command runner ─────────────────────────────────────────
+
+function runCmd(raw) {
+  const input = raw.trim();
+  if (!input) return;
+
+  inputEl.value = '';
+  history.unshift(input);
+  if (history.length > 100) history.pop();
+  histIdx = -1;
+
+  echoCmd(input);
+
+  const parts = input.split(/\s+/);
+  const verb  = parts[0].toLowerCase();
+  const args  = parts.slice(1);
+
+  if (COMMANDS[verb]) {
+    COMMANDS[verb](args);
+  } else {
+    printLine('c-red', verb + ': command not found  (type HELP)');
+  }
+
+  scrollBottom();
+}
+
+// ── Input event handling ───────────────────────────────────
+
+inputEl.addEventListener('keydown', e => {
+
+  if (e.key === 'Enter') {
+    runCmd(inputEl.value);
+    return;
+  }
+
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (histIdx < history.length - 1) {
+      histIdx++;
+      inputEl.value = history[histIdx];
+    }
+    return;
+  }
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (histIdx > 0) {
+      histIdx--;
+      inputEl.value = history[histIdx];
+    } else {
+      histIdx = -1;
+      inputEl.value = '';
+    }
+    return;
+  }
+
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    tabComplete();
+    return;
+  }
+
+});
+
+// Click anywhere on terminal to focus input
+document.getElementById('terminal').addEventListener('click', () => inputEl.focus());
+
+// ── Tab completion ─────────────────────────────────────────
+
+function tabComplete() {
+  const val   = inputEl.value;
+  const parts = val.split(/\s+/);
+  const verb  = parts[0];
+  const frag  = parts[1] || '';
+
+  const dirKey = cwd.endsWith('/') ? cwd : cwd + '/';
+  const node   = FS[dirKey] || FS[cwd];
+  if (!node || node.type !== 'dir') return;
+
+  const match = node.children.find(c =>
+    c.toLowerCase().startsWith(frag.toLowerCase())
+  );
+  if (!match) return;
+
+  const isDir = match.endsWith('/');
+  if (verb === 'cat' || verb === 'cd') {
+    inputEl.value = verb + ' ' + match;
+  } else if (!verb || verb === match.slice(0, verb.length)) {
+    inputEl.value = (isDir ? 'cd ' : 'cat ') + match;
+  }
+}
+
+// ── Boot sequence ──────────────────────────────────────────
+
+function boot() {
+  buildPermanentChips();
+
+  print([
+    { c: 'c-muted',  t: '===============================================================' },
+    { c: 'c-body',   t: '  FOUNDATION ARCHIVE ACCESS SYSTEM' },
+    { c: 'c-body',   t: '  Case 0001-Alpha  //  Restricted Materials' },
+    { c: 'c-muted',  t: '===============================================================' },
+    { c: '',         t: '' },
+    { c: 'c-body',   t: '  Read access granted. Navigate with ls, cd, cat.' },
+    { c: 'c-body',   t: '  Some records require prior review before access.' },
+    { c: '',         t: '' },
+    { c: 'c-muted',  t: '  Type HELP for command list.' },
+    { c: '',         t: '' },
+    { c: 'c-muted',  t: '---------------------------------------------------------------' },
+    { c: '',         t: '' },
+  ]);
+
+  inputEl.focus();
+}
+
+boot();
+</script>
+</body>
+</html>
