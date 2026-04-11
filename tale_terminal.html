@@ -226,7 +226,7 @@ const FS = {
   // ── ROOT ─────────────────────────────────────────────────
   '/': {
     type: 'dir',
-    children: ['README', 'proj/''],
+    children: ['README', 'proj/'],
     // Add more root-level entries here as you write them.
     // Example: children: ['README', 'dev01/', 'evidence/'],
   },
@@ -262,7 +262,7 @@ const FS = {
     lines: [
      { c: 'c-muted',   t: 'This is test text.' },
      ],
- },
+  },
 
   // ── EXAMPLE: HOW TO ADD DIRECTORIES AND FILES ────────────
   //
@@ -369,7 +369,7 @@ function scrollBottom() {
 
 function promptString() {
   const display = cwd === '/' ? '~' : '~' + cwd.replace(/\/$/, '');
-  return 'guest@fnd:' + display + '$';
+  return 'tmp_rd@fnd:' + display + '$';
 }
 
 function updatePrompt() {
