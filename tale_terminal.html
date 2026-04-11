@@ -226,7 +226,7 @@ const FS = {
   // ── ROOT ─────────────────────────────────────────────────
   '/': {
     type: 'dir',
-    children: ['README'],
+    children: ['README', 'proj/''],
     // Add more root-level entries here as you write them.
     // Example: children: ['README', 'dev01/', 'evidence/'],
   },
@@ -240,7 +240,7 @@ const FS = {
     { c: 'c-muted',  t: '  Transferred by: Marlowe Celyn, Internal Audit Lead' },
     { c: 'c-muted',  t: '===============================================================' },
     { c: '',         t: '' },
-    { c: 'c-body',   t: '  Following an internal request, the following items were manually' },
+    { c: 'c-body',   t: '  Concluding an internal request, the following items were manually' },
     { c: 'c-body',   t: '  recovered from tape archive for additional review.' },
     { c: '',         t: '' },
     { c: 'c-body',   t: '  Personal memos, error logs, and related material were preserved.' },
@@ -251,6 +251,18 @@ const FS = {
     { c: '',         t: '' },
    ],
   },
+
+ '/proj': {
+     type: 'dir',
+     children: ['proposal_new'],
+ },
+
+ '/proj/proposal_new': {
+    type: 'file',
+    lines: [
+     { c: 'c-muted',   t: 'This is test text.' },
+     ],
+ },
 
   // ── EXAMPLE: HOW TO ADD DIRECTORIES AND FILES ────────────
   //
